@@ -1,0 +1,38 @@
+# Sample dnsproxy configuration
+# 
+# Servers:
+#
+# "local" is the local address and port to which the server will bind;
+#
+# "upstream" is the upstream DNS resolver. Port is 53 if not specified.
+#
+# Both are listening on UDP only.
+#
+[servers]
+local = "127.0.0.1:5353"
+upstream = "8.8.8.8"
+
+# Filtering rules, one [[rules]] entry for each name
+#
+# For each entry:
+#
+# "name": name to be matched from request, exact match, case insensitive.
+# "ops": array of operations to be performed on response. Initially, we
+# have:
+#
+# "collapse_cname_chain": leave just one CNAME record, pointing from the
+# original name to the one that maps to actual values;
+#
+# "trim_addr_list:N": keep at most N addresses in the reply;
+#
+# "adjust_ttl:N": if TTL is less than N, set it to N;
+#
+# "discard_aaaa": drop all AAAA records from the response.
+#
+[[rules]]
+name = "www.example.com"
+ops = ["collapse_cname_chain", "trim_addr_list:5", "adjust_ttl:600"]
+
+[[rules]]
+name = "www.example.org"
+ops = ["discard_aaaa"]

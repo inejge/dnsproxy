@@ -1,0 +1,16 @@
+[package]
+authors = ["Ivan Nejgebauer <inejge@gmail.com>"]
+name = "ustream"
+version = "0.1.0"
+
+[dependencies]
+futures = "0.1.6"
+lazy_static = "0.2.2"
+tokio-core = "0.1.1"
+toml = "0.2.1"
+
+[dependencies.trust-dns]
+git = "https://github.com/bluejekyll/trust-dns"
+
+[dependencies.trust-dns-server]
+git = "https://github.com/bluejekyll/trust-dns"
