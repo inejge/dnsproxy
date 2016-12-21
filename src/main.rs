@@ -1,4 +1,5 @@
 extern crate futures;
+extern crate fnv;
 #[macro_use] extern crate lazy_static;
 extern crate tokio_core;
 extern crate toml;
@@ -6,7 +7,6 @@ extern crate trust_dns;
 extern crate trust_dns_server;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::env;
 use std::error::Error;
 use std::fs::File;
@@ -14,6 +14,7 @@ use std::io::{self, Read};
 use std::net::{SocketAddr, UdpSocket};
 use std::rc::Rc;
 
+use fnv::FnvHashMap;
 use futures::{Future, Stream, future};
 use tokio_core::reactor::Core;
 use trust_dns::client::{ClientFuture, ClientHandle};
@@ -33,7 +34,7 @@ enum AnsOp {
 struct ProxyEndpoint {
     io_loop: Core,
     upstream_dns: SocketAddr,
-    name_map: Rc<RefCell<HashMap<Name, Vec<AnsOp>>>>,
+    name_map: Rc<RefCell<FnvHashMap<Name, Vec<AnsOp>>>>,
 }
 
 lazy_static! {
@@ -52,7 +53,7 @@ impl ProxyEndpoint {
         Ok(ProxyEndpoint {
             io_loop: try!(Core::new()),
             upstream_dns: upstream_dns,
-            name_map: Rc::new(RefCell::new(HashMap::new())),
+            name_map: Rc::new(RefCell::new(FnvHashMap::default())),
         })
     }
 
@@ -116,9 +117,11 @@ impl ProxyEndpoint {
             mybox(client.query(qname.clone(), qclass, qtype)
                     .map_err(|e| other(&format!("dns error: {}", e)))
                     .and_then(move |mut response| {
-                if name_map.borrow().contains_key(&qname) && response.get_response_code() == ResponseCode::NoError && qclass == DNSClass::IN {
-                    response = process_response(response, &name_map.borrow()[&qname]);
-                }
+                if response.get_response_code() == ResponseCode::NoError && qclass == DNSClass::IN {
+		    if let Some(ops) = name_map.borrow().get(&qname) {
+			response = process_response(response, ops);
+		    }
+		}
                 response.id(request.message.get_id());
                 future::ok((response_handle, response))
             }))

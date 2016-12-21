@@ -1,9 +1,10 @@
 [package]
 authors = ["Ivan Nejgebauer <inejge@gmail.com>"]
 name = "dnsproxy"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
+fnv = "1.0.5"
 futures = "0.1.6"
 lazy_static = "0.2.2"
 tokio-core = "0.1.1"
