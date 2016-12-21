@@ -1,6 +1,6 @@
 [package]
 authors = ["Ivan Nejgebauer <inejge@gmail.com>"]
-name = "ustream"
+name = "dnsproxy"
 version = "0.1.0"
 
 [dependencies]

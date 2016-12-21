@@ -1,5 +1,5 @@
 [root]
-name = "ustream"
+name = "dnsproxy"
 version = "0.1.0"
 dependencies = [
  "futures 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
