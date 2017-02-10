@@ -17,7 +17,7 @@ use std::rc::Rc;
 use fnv::FnvHashMap;
 use futures::{Future, Stream, future};
 use tokio_core::reactor::Core;
-use trust_dns::client::{ClientFuture, ClientHandle};
+use trust_dns::client::{BasicClientHandle, ClientFuture, ClientHandle};
 use trust_dns::udp::{UdpStream, UdpClientStream};
 use trust_dns::op::{Message, ResponseCode};
 use trust_dns::rr::{DNSClass, Name, RecordType};
@@ -33,7 +33,7 @@ enum AnsOp {
 
 struct ProxyEndpoint {
     io_loop: Core,
-    upstream_dns: SocketAddr,
+    upstream_dns: BasicClientHandle,
     name_map: Rc<RefCell<FnvHashMap<Name, Vec<AnsOp>>>>,
 }
 
@@ -49,16 +49,19 @@ impl ProxyEndpoint {
         if upstream.find(':').is_none() {
             server_port.push_str(":53");
         }
-        let upstream_dns = try!((&server_port).parse::<SocketAddr>().map_err(|e| other(e.description())));
+        let upstream_dns = (&server_port).parse::<SocketAddr>().map_err(|e| other(e.description()))?;
+        let io_loop = Core::new()?;
+        let (stream, sender) = UdpClientStream::new(upstream_dns, io_loop.handle());
+        let upstream_dns = ClientFuture::new(stream, sender, io_loop.handle(), None);
         Ok(ProxyEndpoint {
-            io_loop: try!(Core::new()),
+            io_loop: io_loop,
             upstream_dns: upstream_dns,
             name_map: Rc::new(RefCell::new(FnvHashMap::default())),
         })
     }
 
     fn add_name_with_ops(&self, name: &str, ops: Vec<&str>) -> io::Result<()> {
-        let dns_name = try!(Name::parse(name, Some(&ROOT)).map_err(|e| other(&format!("error parsing `{}': {}", name, e.description()))));
+        let dns_name = Name::parse(name, Some(&ROOT)).map_err(|e| other(&format!("error parsing `{}': {}", name, e.description())))?;
         if self.name_map.borrow().contains_key(&dns_name) {
             return Err(other(&format!("name `{}' already in map", name)));
         }
@@ -78,14 +81,14 @@ impl ProxyEndpoint {
             if str_op.starts_with("trim_addr_list:") {
                 let mut name_val = str_op.split(':');
                 name_val.next().expect("tr_name");
-                let val = try!(name_val.next().expect("tr_val").parse::<u32>().map_err(|e| other(e.description())));
+                let val = name_val.next().expect("tr_val").parse::<u32>().map_err(|e| other(e.description()))?;
                 op_vec.push(AnsOp::TrimAddrList(val));
                 continue;
             }
             if str_op.starts_with("adjust_ttl:") {
                 let mut name_val = str_op.split(':');
                 name_val.next().expect("ttl_name");
-                let val = try!(name_val.next().expect("ttl_val").parse::<u32>().map_err(|e| other(e.description())));
+                let val = name_val.next().expect("ttl_val").parse::<u32>().map_err(|e| other(e.description()))?;
                 op_vec.push(AnsOp::AdjustTTL(val));
                 continue;
             }
@@ -101,8 +104,7 @@ impl ProxyEndpoint {
     fn listen(&mut self, socket: UdpSocket) {
         let (buf_stream, stream_handle) = UdpStream::with_bound(socket, self.io_loop.handle());
         let request_stream = RequestStream::new(buf_stream, stream_handle);
-        let handle = self.io_loop.handle();
-        let upstream_dns = self.upstream_dns.clone();
+        let mut upstream_dns = self.upstream_dns.clone();
         let name_map = self.name_map.clone();
         let queries = request_stream.map(|(request, response_handle)| {
             if request.message.get_queries().len() != 1 {
@@ -112,16 +114,14 @@ impl ProxyEndpoint {
             let qtype = request.message.get_queries()[0].get_query_type();
             let qclass = request.message.get_queries()[0].get_query_class();
             let name_map = name_map.clone();
-            let (stream, sender) = UdpClientStream::new(upstream_dns, handle.clone());
-            let mut client = ClientFuture::new(stream, sender, handle.clone(), None);
-            mybox(client.query(qname.clone(), qclass, qtype)
+            mybox(upstream_dns.query(qname.clone(), qclass, qtype)
                     .map_err(|e| other(&format!("dns error: {}", e)))
                     .and_then(move |mut response| {
                 if response.get_response_code() == ResponseCode::NoError && qclass == DNSClass::IN {
-		    if let Some(ops) = name_map.borrow().get(&qname) {
-			response = process_response(response, ops);
-		    }
-		}
+                    if let Some(ops) = name_map.borrow().get(&qname) {
+                        response = process_response(response, ops);
+                    }
+                }
                 response.id(request.message.get_id());
                 future::ok((response_handle, response))
             }))
