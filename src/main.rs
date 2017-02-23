@@ -94,7 +94,7 @@ impl ProxyEndpoint {
             }
             return Err(other(&format!("unrecognized op: {}", str_op)));
         }
-        if op_vec.len() == 0 {
+        if op_vec.is_empty() {
             return Err(other(&format!("empty op list for `{}'", name)));
         }
         self.name_map.borrow_mut().insert(dns_name, op_vec);
@@ -145,7 +145,7 @@ impl ProxyEndpoint {
     }
 }
 
-fn process_response(mut response: Message, ops: &Vec<AnsOp>) -> Message {
+fn process_response(mut response: Message, ops: &[AnsOp]) -> Message {
     let mut answers = response.take_answers();
 
     // CNAME processing
@@ -189,8 +189,8 @@ fn process_response(mut response: Message, ops: &Vec<AnsOp>) -> Message {
             RecordType::CNAME => {
                 last_was_cname = true;
                 if have_collapse_cname_chain {
-                    let cname = match answer.get_rdata() {
-                        &RData::CNAME(ref rdata) => rdata.clone(),
+                    let cname = match *answer.get_rdata() {
+                        RData::CNAME(ref rdata) => rdata.clone(),
                         _ => unreachable!(),
                     };
                     if idx == 0 {
@@ -239,11 +239,11 @@ fn process_response(mut response: Message, ops: &Vec<AnsOp>) -> Message {
         answers.remove(id);
     }
     match last_cname {
-        Some(ref cname) if answers.len() > 0 => { answers[0].rdata(RData::CNAME(cname.clone())); },
+        Some(ref cname) if !answers.is_empty() => { answers[0].rdata(RData::CNAME(cname.clone())); },
         _ => (),
     }
     if have_adjust_ttl {
-        for answer in answers.iter_mut() {
+        for answer in &mut answers {
             if answer.get_ttl() < minimum_ttl {
                 answer.ttl(minimum_ttl);
             }
@@ -279,12 +279,12 @@ fn main() {
     let local = toml.lookup("servers.local").map(toml::Value::as_str).unwrap_or(Some("127.0.0.1:5353")).expect("local");
     let upstream = match toml.lookup("servers.upstream") {
         None => panic!("no upstream server in config"),
-        Some(ref v) => v.as_str().expect("upstream"),
+        Some(v) => v.as_str().expect("upstream"),
     };
     let mut proxy = ProxyEndpoint::new(upstream).expect("proxy");
 
-    match toml.lookup("rules") {
-        Some(rules) => for rule in rules.as_slice().expect("rules") {
+    if let Some(rules) = toml.lookup("rules") {
+        for rule in rules.as_slice().expect("rules") {
             let name = match rule.lookup("name") {
                 None => panic!("nameless rules not permitted"),
                 Some(n) => n.as_str().expect("name"),
@@ -298,8 +298,7 @@ fn main() {
                 ops.push(op.as_str().expect("op"));
             }
             proxy.add_name_with_ops(name, ops).expect("add_name");
-        },
-        None => (),
+        }
     }
 
     let socket = UdpSocket::bind(local).expect("socket");
